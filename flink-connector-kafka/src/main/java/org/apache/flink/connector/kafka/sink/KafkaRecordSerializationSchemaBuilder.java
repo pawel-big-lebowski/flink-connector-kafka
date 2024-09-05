@@ -19,6 +19,11 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.serialization.SerializationSchema;
+import org.apache.flink.api.common.typeinfo.TypeInformation;
+import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicListFacet;
+import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 
 import org.apache.kafka.clients.producer.ProducerRecord;
@@ -27,7 +32,10 @@ import org.apache.kafka.common.serialization.Serializer;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.OptionalInt;
 import java.util.function.Function;
@@ -306,7 +314,7 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
     }
 
     private static class KafkaRecordSerializationSchemaWrapper<IN>
-            implements KafkaRecordSerializationSchema<IN> {
+            implements LineageFacetProvider, KafkaRecordSerializationSchema<IN> {
         private final SerializationSchema<? super IN> valueSerializationSchema;
         private final Function<? super IN, String> topicSelector;
         private final KafkaPartitioner<? super IN> partitioner;
@@ -368,6 +376,24 @@ public class KafkaRecordSerializationSchemaBuilder<IN> {
                     key,
                     value,
                     headerProvider != null ? headerProvider.getHeaders(element) : null);
+        }
+
+        @Override
+        public List<LineageDatasetFacet> getDatasetFacets() {
+            List<LineageDatasetFacet> facets = new ArrayList<>();
+            facets.add(new KafkaTopicListFacet(Arrays.asList(topicSelector.apply(null))));
+
+            // gets type information from serialize method signature
+            Arrays.stream(this.valueSerializationSchema.getClass().getMethods())
+                    .filter(m -> "serialize".equalsIgnoreCase(m.getName()))
+                    .filter(m -> m.getParameterTypes()[0] != Object.class)
+                    .findAny()
+                    .map(m -> m.getParameterTypes()[0])
+                    .map(t -> TypeInformation.of(t))
+                    .map(g -> new TypeInformationFacet(g))
+                    .ifPresent(f -> facets.add(f));
+
+            return facets;
         }
     }
 }

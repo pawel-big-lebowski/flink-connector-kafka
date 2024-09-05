@@ -19,7 +19,12 @@ package org.apache.flink.connector.kafka.sink;
 
 import org.apache.flink.api.common.serialization.SerializationSchema;
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
+import org.apache.flink.connector.kafka.lineage.LineageFacetProvider;
+import org.apache.flink.connector.kafka.lineage.facets.KafkaTopicListFacet;
+import org.apache.flink.connector.kafka.lineage.facets.TypeInformationFacet;
 import org.apache.flink.connector.testutils.formats.DummyInitializationContext;
+import org.apache.flink.streaming.api.lineage.LineageDatasetFacet;
 import org.apache.flink.streaming.connectors.kafka.partitioner.FlinkKafkaPartitioner;
 import org.apache.flink.util.TestLogger;
 
@@ -254,6 +259,29 @@ public class KafkaRecordSerializationSchemaBuilderTest extends TestLogger {
         final ProducerRecord<byte[], byte[]> recordWithInvalidTimestamp =
                 schema.serialize("a", null, -100L);
         assertThat(recordWithInvalidTimestamp.timestamp()).isNull();
+    }
+
+    @Test
+    public void testGetLineageDatasetFacets() {
+        final SerializationSchema<String> serializationSchema = new SimpleStringSchema();
+        final KafkaRecordSerializationSchema<String> schema =
+                KafkaRecordSerializationSchema.builder()
+                        .setTopic(DEFAULT_TOPIC)
+                        .setValueSerializationSchema(serializationSchema)
+                        .setKeySerializationSchema(serializationSchema)
+                        .build();
+
+        List<LineageDatasetFacet> facets = ((LineageFacetProvider) schema).getDatasetFacets();
+
+        assertThat(facets).hasSize(2);
+
+        assertThat(facets.get(0)).isInstanceOf(KafkaTopicListFacet.class);
+        assertThat(((KafkaTopicListFacet) facets.get(0)))
+                .hasFieldOrPropertyWithValue("topics", Arrays.asList(DEFAULT_TOPIC));
+
+        assertThat(facets.get(1)).isInstanceOf(TypeInformationFacet.class);
+        assertThat(((TypeInformationFacet) facets.get(1)).getTypeInformation())
+                .isEqualTo(BasicTypeInfo.STRING_TYPE_INFO);
     }
 
     private static void assertOnlyOneSerializerAllowed(
